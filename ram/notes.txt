@@ -1,0 +1,24 @@
+REDQ has the following key components: 
+(i) To improve sample efficiency, the UTD ratio G is much greater than one; 
+(ii) To reduce the variance in the Q-function estimate, REDQ uses an ensemble of N Q-functions, with
+each Q-function randomly and independently initialized but updated with the same target;
+(iii) To reduce over-estimation bias, the target for the Q-function includes a minimization over a random
+subset M of the N Q-functions. The size of the subset M is kept fixed, and is denoted as M , and is
+referred to as the in-target minimization parameter
+
+
+default choice for is M = 2, N = 10 and G = 20.
+
+
+hyperparameters:
+M is the size of the subset of the ensemble to minimize (in-target minimization parameter) (to reduce over estimation bias).
+N is the size of the over estimation. 
+G is the update to data ratio
+
+
+
+https://arxiv.org/pdf/2101.05982.pdf (REDQ)
+https://arxiv.org/abs/2003.01629 (Can Increasing Input Dimensionality Improve Deep Reinforcement Learning?)
+
+
+https://arxiv.org/pdf/1910.07207.pdf (SOFT ACTOR-CRITIC FOR DISCRETE ACTION SETTINGS)

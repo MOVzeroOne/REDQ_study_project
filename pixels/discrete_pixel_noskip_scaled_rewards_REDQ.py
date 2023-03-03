@@ -368,7 +368,6 @@ class discrete_REDQ(nn.Module):
             
             self.current_state = state
 
-            self.writer.add_scalar("cummulative_rewards",self.cummulative_reward,step_num)
             self.writer.add_scalar("entropy_mean",self.entropy_mean/self.env_steps,step_num)
 
             self.life_num += 1

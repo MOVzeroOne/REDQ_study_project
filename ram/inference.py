@@ -1,4 +1,4 @@
-from discrete_REDQ import policy_network
+from discrete_ram_noskip_truncated_rewards_REDQ import policy_network
 import torch 
 import torch.nn as nn 
 import torch.optim as optim 
@@ -29,9 +29,9 @@ if __name__ == "__main__":
     #hyperparam
     obs_size = 128
     action_size = 6
-    struct_body = [100,100,100,100,100]
-    file_name = "./checkpoints/num_estimates_10step_12800_mean75.0_median75.0_std35.35533905029297_max105.0_min20.0.pt"
-    env_name ="ALE/SpaceInvaders-v5"
+    struct_body = [100,100,100,100]
+    file_name = "./checkpoints/num_estimates_25step_8600_mean54.0_median60.0_std15.0_max90.0_min30.0.pt"
+    env_name ="SpaceInvaders-ramNoFrameskip-v4"
     load_param = True
     only_one_Life = True 
 

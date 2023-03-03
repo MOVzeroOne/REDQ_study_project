@@ -9,9 +9,8 @@ from copy import deepcopy
 from tqdm import tqdm 
 from torch.utils.tensorboard import SummaryWriter
 import os
-from wrappers import one_life,AtariPreprocessing
+from wrappers import one_life,scaled_rewards
 from gymnasium.wrappers import FrameStack,ResizeObservation
-import matplotlib.pyplot as plt 
 
 class experience_buffer():
     """
@@ -95,7 +94,7 @@ class critic_network(nn.Module):
     def __init__(self,obs_size:int,action_size:int,struct_body:list) -> None:
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(4, 16, kernel_size=(3,3), stride=2),
+            nn.Conv2d(12, 16, kernel_size=(3,3), stride=2),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=(3,3), stride=2),
             nn.ReLU(),
@@ -114,7 +113,7 @@ class policy_network(nn.Module):
     def __init__(self,obs_size:int,action_size:int,struct_body:list,softmax_dim:int=1) -> None:
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(4, 16, kernel_size=(3,3), stride=2),
+            nn.Conv2d(12, 16, kernel_size=(3,3), stride=2),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=(3,3), stride=2),
             nn.ReLU(),
@@ -168,7 +167,7 @@ class discrete_REDQ(nn.Module):
     arXiv:1910.07207 discrete soft actor critic
     """
 
-    def __init__(self,obs_size:int,action_size:int,policy_body_struct:list,critic_body_struct:list,env:gym.Env,writer:SummaryWriter,optim_kwargs:dict,optimizer:optim=optim.Adam,N:int=10,M:int=2,G:int=10,γ:float=0.99,ρ:float=0.005,α:float=0.5,buffer_size:int=int(1e6),device:str="cuda:0") -> None:
+    def __init__(self,obs_size:int,action_size:int,policy_body_struct:list,critic_body_struct:list,env:gym.Env,writer:SummaryWriter,optim_kwargs:dict,optimizer:optim=optim.Adam,N:int=10,M:int=2,G:int=10,γ:float=0.99,ρ:float=0.995,α:float=0.05,buffer_size:int=int(1e6),device:str="cuda:0") -> None:
         super().__init__()
         self.device = device 
 
@@ -192,6 +191,7 @@ class discrete_REDQ(nn.Module):
         self.chosen_Q_mean = 0
         self.entropy_mean = 0
         self.env_steps = 1
+        self.life_num = 0
 
         self.obs_size = obs_size
         self.action_size = action_size
@@ -277,6 +277,14 @@ class discrete_REDQ(nn.Module):
         #min_Q size= (batch)
         
         return min_Q 
+    
+    def average_Q(self,state):
+        return torch.mean(torch.tensor([critic(state).mean() for critic in self.critic_ensemble]))
+        
+    
+    def chosen_Q(self,state,action):
+        return torch.mean(torch.tensor([torch.gather(critic(state),dim=1,index=action) for critic in self.critic_ensemble]))
+
 
     def policy_update(self,states:torch.Tensor) -> None:
         """
@@ -363,6 +371,7 @@ class discrete_REDQ(nn.Module):
             self.writer.add_scalar("cummulative_rewards",self.cummulative_reward,step_num)
             self.writer.add_scalar("entropy_mean",self.entropy_mean/self.env_steps,step_num)
 
+            self.life_num += 1
             self.cummulative_reward = 0
             self.Q_mean = 0
             self.chosen_Q_mean = 0
@@ -376,17 +385,27 @@ class discrete_REDQ(nn.Module):
         action = dist.sample().item()
         next_state, reward, done, _, _ = self.env.step(action)
         self.buffer.append((self.current_state,next_state,action,reward,done))
-        self.current_state = next_state
+        
         self.cummulative_reward += reward
-
         self.entropy_mean += dist.entropy()
 
+        self.Q_mean = self.average_Q(torch.tensor(np.array(self.current_state),dtype=torch.float,device=self.device).unsqueeze(dim=0))
+        self.chosen_Q_mean = self.chosen_Q(torch.tensor(np.array(self.current_state),dtype=torch.float,device=self.device).unsqueeze(dim=0),torch.tensor([[action]],dtype=torch.long,device=self.device))
+
+        
+        self.writer.add_scalar("cummulative_rewards/"+str(self.life_num),self.cummulative_reward,step_num)
+        self.writer.add_scalar("entropy/"+str(self.life_num),dist.entropy(),step_num)
+        self.writer.add_scalar("chosen_Q/"+str(self.life_num),self.Q_mean,step_num)
+        self.writer.add_scalar("Q_mean/"+str(self.life_num),self.chosen_Q_mean,step_num)    
         if(done):
             self.is_done = True 
 
         #G updates
         self.update(batch_size) 
         self.env_steps += 1
+        #update state 
+        self.current_state = next_state
+
     
     def inference(self,env:gym.Env) -> int:
         state,_ = env.reset()
@@ -395,7 +414,7 @@ class discrete_REDQ(nn.Module):
         with torch.no_grad():
             
             while(True):
-                _,dist = self.policy_net(torch.tensor(np.array(self.current_state),dtype=torch.float,device=self.device).unsqueeze(dim=0))
+                _,dist = self.policy_net(torch.tensor(np.array(state),dtype=torch.float,device=self.device).unsqueeze(dim=0))
                 action = dist.sample().item()
                 next_state, reward, done, _, _ = env.step(action)
                 state = next_state
@@ -418,14 +437,15 @@ https://www.gymlibrary.dev/environments/atari/#id2 #modes and stuff for artari e
 """
 
 def env_space_invaders(render_mode=None):
-    env = gym.make("ALE/SpaceInvaders-v5",obs_type="grayscale",repeat_action_probability=0,full_action_space=False,render_mode=render_mode) #already skips 4 frames
+    env = gym.make("SpaceInvaders-ramNoFrameskip-v4",obs_type="grayscale",repeat_action_probability=0,full_action_space=False,render_mode=render_mode) 
     env = ResizeObservation(env,(84,84))
-    return one_life(FrameStack(env, 4))
+    return scaled_rewards(one_life(FrameStack(env, 12)))
 
 if __name__ == "__main__":
     make_checkpoints_folder()
 
     #hyperparam 
+
     lr = 0.0001
     policy_body_struct = [100,100,100]
     critic_body_struct = [100,100,100]
@@ -433,10 +453,10 @@ if __name__ == "__main__":
     action_size = 6 #reduced action space
     batch_size = 64
     
-    iterations = 1e6
+    iterations = 1e10
     writer = SummaryWriter()
     
-    number_of_estimates = 100
+    number_of_estimates = 10
 
     #init
     env = env_space_invaders()

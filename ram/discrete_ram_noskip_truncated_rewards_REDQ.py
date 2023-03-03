@@ -9,7 +9,7 @@ from copy import deepcopy
 from tqdm import tqdm 
 from torch.utils.tensorboard import SummaryWriter
 import os
-from wrappers import one_life
+from wrappers import one_life,truncated_rewards
 
 
 class experience_buffer():
@@ -143,7 +143,7 @@ class discrete_REDQ(nn.Module):
     arXiv:1910.07207 discrete soft actor critic
     """
 
-    def __init__(self,obs_size:int,action_size:int,policy_body_struct:list,critic_body_struct:list,env:gym.Env,writer:SummaryWriter,optim_kwargs:dict,optimizer:optim=optim.Adam,N:int=10,M:int=2,G:int=10,γ:float=0.99,ρ:float=0.95,α:float=0.2,buffer_size:int=int(1e6),device:str="cpu:0") -> None:
+    def __init__(self,obs_size:int,action_size:int,policy_body_struct:list,critic_body_struct:list,env:gym.Env,writer:SummaryWriter,optim_kwargs:dict,optimizer:optim=optim.Adam,N:int=10,M:int=2,G:int=10,γ:float=0.9999,ρ:float=0.995,α:float=0.05,buffer_size:int=int(1e8),device:str="cpu:0") -> None:
         super().__init__()
         self.device = device 
 
@@ -159,7 +159,6 @@ class discrete_REDQ(nn.Module):
         self.ρ = ρ #target smoothing coefficient (how much of the target critic is kept for each update, 0.005 is 0.5% of target critic is kept)
         self.α = α #entropy scaling factor (since entropy is not calculated with log(p) but we have the actual entropy range [0,1], tuning by hand should be fine instead of setting a target entropy and scaling alpha to get that target to be the expected entropy when visiting states)
 
-    
 
         self.writer = writer
         self.cummulative_reward = 0
@@ -167,6 +166,7 @@ class discrete_REDQ(nn.Module):
         self.chosen_Q_mean = 0
         self.entropy_mean = 0
         self.env_steps = 1
+        self.life_num = 0
 
         self.obs_size = obs_size
         self.action_size = action_size
@@ -253,6 +253,14 @@ class discrete_REDQ(nn.Module):
         
         return min_Q 
 
+    def average_Q(self,state):
+        return torch.mean(torch.tensor([critic(state).mean() for critic in self.critic_ensemble]))
+        
+    
+    def chosen_Q(self,state,action):
+        return torch.mean(torch.tensor([torch.gather(critic(state),dim=1,index=action) for critic in self.critic_ensemble]))
+
+
     def policy_update(self,states:torch.Tensor) -> None:
         """
         maximize the expected Q+entropy.
@@ -305,7 +313,7 @@ class discrete_REDQ(nn.Module):
             y = rewards + self.γ*(min_Q+self.α*entropy) # (Q' + entropy) as this is not log probability but the real entropy of the policy distribution. 
             #And we want to maximize entropy, so we should get into states that increase the entropy of the actions. (so adding is appropriate)
 
-            y[dones] = rewards[dones] #since terminal states should be Q(s,a) = reward instead of Q(s,a) = reward + gamma*(Q(a',s')+alpha*H)
+            y[dones] = rewards[dones]  #since terminal states should be Q(s,a) = reward instead of Q(s,a) = reward + gamma*(Q(a',s')+alpha*H)
 
             #update critics
             for critic in self.critic_ensemble:
@@ -329,13 +337,13 @@ class discrete_REDQ(nn.Module):
         #1 enviroment step
         if(self.is_done): 
             #reset enviroment when start
+            
             self.is_done = False 
             state, _ = self.env.reset()
             self.current_state = state
-
-            self.writer.add_scalar("cummulative_rewards",self.cummulative_reward,step_num)
             self.writer.add_scalar("entropy_mean",self.entropy_mean/self.env_steps,step_num)
 
+            self.life_num += 1
             self.cummulative_reward = 0
             self.Q_mean = 0
             self.chosen_Q_mean = 0
@@ -345,22 +353,33 @@ class discrete_REDQ(nn.Module):
         with torch.no_grad():
             _,dist = self.policy_net(torch.tensor(self.current_state,dtype=torch.float,device=self.device).view(1,-1))
             
+
             
         action = dist.sample().item()
         next_state, reward, done, _, _ = self.env.step(action)
         self.buffer.append((self.current_state,next_state,action,reward,done))
-        self.current_state = next_state
+        
         self.cummulative_reward += reward
-
         self.entropy_mean += dist.entropy()
 
+        self.Q_mean = self.average_Q(torch.tensor(self.current_state,dtype=torch.float,device=self.device).view(1,-1))
+        self.chosen_Q_mean = self.chosen_Q(torch.tensor(self.current_state,dtype=torch.float,device=self.device).view(1,-1),torch.tensor([[action]],dtype=torch.long,device=self.device))
+
+
+        self.writer.add_scalar("cummulative_rewards/"+str(self.life_num),self.cummulative_reward,step_num)
+        self.writer.add_scalar("entropy/"+str(self.life_num),dist.entropy(),step_num)
+        self.writer.add_scalar("chosen_Q/"+str(self.life_num),self.Q_mean,step_num)
+        self.writer.add_scalar("Q_mean/"+str(self.life_num),self.chosen_Q_mean,step_num)    
         if(done):
             self.is_done = True 
 
         #G updates
         self.update(batch_size) 
         self.env_steps += 1
-    
+        #update state
+        self.current_state = next_state
+
+
     def inference(self,env:gym.Env) -> int:
         state,_ = env.reset()
         cummulative_reward = 0 
@@ -391,26 +410,28 @@ https://www.gymlibrary.dev/environments/atari/#id2 #modes and stuff for artari e
 """
 
 
+
 if __name__ == "__main__":
     make_checkpoints_folder()
 
     #hyperparam 
     lr = 0.0001
-    policy_body_struct = [100,100,100,100,100]
-    critic_body_struct = [100,100,100,100,100]
+    policy_body_struct = [100,100,100,100]
+    critic_body_struct = [100,100,100,100]
     obs_size = 128
     action_size = 6 #reduced action space
-    batch_size = 64
-    env_name = "ALE/SpaceInvaders-v5"
-    iterations = 1e6
+    batch_size = 126
+    env_name = "SpaceInvaders-ramNoFrameskip-v4"
+    iterations = 1e10
     writer = SummaryWriter()
     
-    number_of_estimates = 10
+    number_of_estimates = 25
 
     #init
-    env = one_life(gym.make(env_name,obs_type="ram",repeat_action_probability=0,full_action_space=False)) 
+    env = truncated_rewards(one_life(gym.make(env_name,obs_type="ram",repeat_action_probability=0,full_action_space=False)))
     print("action_space: ",env.action_space)
     print("observation_space: ",env.observation_space)
+    print("frames_skipped: ",env.unwrapped._frameskip)
     REDQ = discrete_REDQ(writer=writer,obs_size=obs_size, action_size=action_size, policy_body_struct=policy_body_struct , critic_body_struct= critic_body_struct, env=env, optim_kwargs={"lr":lr})
 
     #train loop
@@ -418,7 +439,7 @@ if __name__ == "__main__":
         REDQ.step(batch_size,step_num)
         
         if(step_num % 100 == 0):            
-            array = torch.tensor([REDQ.inference(one_life(gym.make(env_name,obs_type="ram",repeat_action_probability=0,full_action_space=False) )) for _ in range(number_of_estimates)])
+            array = torch.tensor([REDQ.inference(truncated_rewards(one_life(gym.make(env_name,obs_type="ram",repeat_action_probability=0,full_action_space=False) ))) for _ in range(number_of_estimates)])
             perf_mean = array.mean().item()
             perf_median = array.median().item()
             perf_std = array.std().item()

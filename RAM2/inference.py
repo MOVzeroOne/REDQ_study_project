@@ -30,7 +30,7 @@ def inference(policy_net:policy_network,env:gym.Env,device="cuda:0",deterministi
     return cummulative_reward
 
 
-def env_space_invaders(render_mode=None):
+def env_space_invaders(render_mode="human"):
     env = gym.make("SpaceInvaders-ramDeterministic-v4",repeat_action_probability=0,full_action_space=False,render_mode=render_mode) 
     return one_life(env)
 

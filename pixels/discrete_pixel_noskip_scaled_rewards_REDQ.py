@@ -436,7 +436,7 @@ https://www.gymlibrary.dev/environments/atari/#id2 #modes and stuff for artari e
 """
 
 def env_space_invaders(render_mode=None):
-    env = gym.make("SpaceInvaders-ramNoFrameskip-v4",obs_type="grayscale",repeat_action_probability=0,full_action_space=False,render_mode=render_mode) 
+    env = gym.make("SpaceInvadersDeterministic-v4",obs_type="grayscale",repeat_action_probability=0,full_action_space=False,render_mode=render_mode) 
     env = ResizeObservation(env,(84,84))
     return scaled_rewards(one_life(FrameStack(env, 12)))
 

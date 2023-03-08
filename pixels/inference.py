@@ -29,7 +29,7 @@ def inference(policy_net:policy_network,env:gym.Env,device="cuda:0") -> int:
 
 
 def env_space_invaders(render_mode="human"):
-    env = gym.make("SpaceInvaders-ramNoFrameskip-v4",obs_type="grayscale",repeat_action_probability=0,full_action_space=False,render_mode=render_mode)
+    env = gym.make("SpaceInvadersDeterministic-v4",obs_type="grayscale",repeat_action_probability=0,full_action_space=False,render_mode=render_mode)
     env = ResizeObservation(env,(84,84))
     return one_life(FrameStack(env, 12))
 

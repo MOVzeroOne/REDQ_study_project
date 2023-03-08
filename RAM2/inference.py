@@ -1,4 +1,4 @@
-from pixels_SAC_REDQ import policy_network
+from ram_SAC_REDQ import policy_network
 import torch 
 import torch.nn as nn 
 import torch.optim as optim 

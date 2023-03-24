@@ -539,7 +539,7 @@ if __name__ == "__main__":
     steps_per_append_Moving_Average = 10
 
     rollout_ever_n_steps = 100
-    epsilon = 0.3
+    epsilon = 0.0
 
     moving_average = deque(maxlen=moving_average_size)
     writer = SummaryWriter()

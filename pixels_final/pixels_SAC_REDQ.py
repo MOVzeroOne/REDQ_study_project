@@ -80,7 +80,7 @@ class mlp(nn.Module):
                 layers.append(self.act_f())
         return nn.Sequential(*layers)
 
-    def forward(self,x:torch.tensor) -> torch.tensor:
+    def forward(self,x:torch.Tensor) -> torch.Tensor:
         return self.layers(x) 
 
 class critic_network(nn.Module):
@@ -121,7 +121,7 @@ class policy_network(nn.Module):
         self.body = mlp([obs_size] + struct_body + [action_size])
         self.head = nn.Softmax(softmax_dim)
     
-    def forward(self,x) -> tuple:
+    def forward(self,x:torch.Tensor) -> tuple:
         probs = self.head(self.body(self.conv(x)))
         dist = D.Categorical(probs)
         return probs,dist
@@ -277,11 +277,11 @@ class discrete_REDQ(nn.Module):
         
         return min_Q 
     
-    def average_Q(self,state):
+    def average_Q(self,state:torch.Tensor) -> torch.Tensor:
         return torch.mean(torch.tensor([critic(state).mean() for critic in self.critic_ensemble]))
         
     
-    def chosen_Q(self,state,action):
+    def chosen_Q(self,state:torch.Tensor,action:torch.Tensor) -> torch.Tensor:
         return torch.mean(torch.tensor([torch.gather(critic(state),dim=1,index=action) for critic in self.critic_ensemble]))
 
     def policy_update(self,states:torch.Tensor) -> None:
@@ -412,7 +412,7 @@ class discrete_REDQ(nn.Module):
         
         self.buffer_consumption(step_num)
 
-    def buffer_consumption(self,step_num):
+    def buffer_consumption(self,step_num:int) -> None:
         used_buffer = len(self.buffer)
         free = self.buffer_size-used_buffer
         self.writer.add_scalar("experience_buffer/used",used_buffer,step_num)
@@ -420,7 +420,7 @@ class discrete_REDQ(nn.Module):
         self.writer.add_scalar("experience_buffer/free",free,step_num)
 
 
-    def memory_consumption(self,step_num):
+    def memory_consumption(self,step_num:int) -> None:
         """
         CONVERSION 
         bytes to GB 
@@ -435,7 +435,7 @@ class discrete_REDQ(nn.Module):
         self.writer.add_scalar("RAM/free",free/(1<<30),step_num)
         
 
-    def cuda_memory_consumption(self,step_num):
+    def cuda_memory_consumption(self,step_num:int) -> None:
         """
         https://stackoverflow.com/questions/58216000/get-total-amount-of-free-gpu-memory-and-available-using-pytorch
         
@@ -505,7 +505,7 @@ class discrete_REDQ(nn.Module):
             return cummulative_reward
 
 
-def make_checkpoints_folder():
+def make_checkpoints_folder() -> None:
     if(not os.path.exists("./checkpoints")):
         os.mkdir("./checkpoints")
     else:
@@ -516,7 +516,7 @@ def make_checkpoints_folder():
 https://www.gymlibrary.dev/environments/atari/#id2 #modes and stuff for artari env
 """
 
-def env_space_invaders(render_mode=None):
+def env_space_invaders(render_mode:str=None) -> None:
     env = gym.make("SpaceInvadersDeterministic-v4",obs_type="grayscale",repeat_action_probability=0,full_action_space=False,render_mode=render_mode) 
     env = ResizeObservation(env,(84,84))
     return scaled_rewards(one_life(FrameStack(env, 4)))
